@@ -1,90 +1,126 @@
-🚀 Mini-vLLM: Minimal PagedAttention & Continuous Batching Engine
+# 🚀 Mini-vLLM Engine  
+### Minimal PagedAttention + Continuous Batching in Pure PyTorch
 
-A lightweight, zero-dependency PyTorch implementation of the core architectural features powering modern high-throughput LLM inference engines (such as vLLM).
+A lightweight, zero-dependency PyTorch implementation of the core architectural ideas behind modern high-throughput LLM serving systems (inspired by [vLLM](https://github.com/vllm-project/vllm)).
 
-This repository demonstrates how to eliminate KV-Cache memory fragmentation and maximize GPU hardware throughput using Operating System Paging Principles and Iteration-Level Dynamic Scheduling.
+---
 
-🏗️ System Architecture
+## ✨ Why this project?
 
-Traditional LLM serving pre-allocates contiguous memory for maximum sequence lengths (e.g., 2048 tokens), leading to over 60%–80% internal memory fragmentation.
+Traditional LLM inference engines often pre-allocate large contiguous KV-cache regions (e.g., for 2048+ tokens per request), causing substantial internal memory waste.
 
-Mini-vLLM solves this by decoupling logical token sequences from physical VRAM allocations:
+**Mini-vLLM** demonstrates a cleaner approach:
 
-Logical Sequence (Request A): [ T0, T1, ... T15 | T16, T17, ... T31 | T32 ... ]
-                                      |                 |
-Block Table Mapping:            Block Table [0]   Block Table [1]
-                                      |                 |
-                                      v                 v
-Physical VRAM Storage:         [ Physical Block 2 ] [ Physical Block 7 ] (Non-contiguous)
+- 🧠 **Paged KV cache** (logical tokens decoupled from physical VRAM)
+- 📦 **Block-based allocation** (OS-style paging principles)
+- 🔄 **Continuous batching** (iteration-level dynamic scheduling)
 
+This helps reduce memory fragmentation and improve effective GPU throughput.
 
-🔑 Key Engineering Concepts Implemented
+---
 
-1. Dynamic Virtual Memory Paging (BlockAllocator)
+## 🏗️ Architecture at a glance
 
-OS-Style Memory Management: Divides physical VRAM into fixed-size block slots (e.g., 16 tokens/block).
+Mini-vLLM separates **logical sequence growth** from **physical memory layout**.
 
-Zero Internal Fragmentation: Allocates physical memory blocks on-demand as sequences grow during the Decode phase.
+```text
+Logical Sequence (Req A):
+[T0..T15] [T16..T31] [T32..]
 
-Integer Ceiling Allocation Math:
+         │        │
+         ▼        ▼
+Block Table:
+   [0]      [1]   ...
 
+         │        │
+         ▼        ▼
+Physical VRAM Blocks:
+ [Block 2] [Block 7] ... (non-contiguous)
+```
 
-$$\text{Required Blocks} = \left\lfloor \frac{N + \text{block\_size} - 1}{\text{block\_size}} \right\rfloor$$
+---
 
-2. Paged KV Cache & Addressing (PagedKVCache)
+## 🔑 Core concepts implemented
 
-Scattered Physical Storage: Holds Key and Value tensors in a single unified 5D physical VRAM tensor:
+### 1) Dynamic Virtual Memory Paging (`BlockAllocator`)
 
+- Divides VRAM into fixed token blocks (e.g., `block_size = 16`)
+- Allocates blocks on-demand as decode progresses
+- Avoids large up-front contiguous reservations
 
-$$\text{Shape: } (\text{num\_blocks}, 2, \text{block\_size}, \text{num\_heads}, \text{head\_dim})$$
+\[
+\text{Required Blocks} = \left\lfloor \frac{N + \text{block\_size} - 1}{\text{block\_size}} \right\rfloor
+\]
 
-Logical-to-Physical Translation: Maps any logical sequence token index $i$ to physical storage on-the-fly without copying VRAM data:
+---
 
+### 2) Paged KV Cache (`PagedKVCache`)
 
-$$\text{Table Index} = i \mathbin{/\!/} \text{block\_size}, \quad \text{Block Offset} = i \bmod \text{block\_size}$$
+- Stores all K/V states in one 5D physical tensor:
 
-3. Iteration-Level Continuous Batching (ContinuousScheduler)
+\[
+(\text{num\_blocks}, 2, \text{block\_size}, \text{num\_heads}, \text{head\_dim})
+\]
 
-Dynamic Batching: Replaces static batching with token-level scheduling.
+- Resolves logical token index \(i\) → physical block location at runtime:
 
-Immediate Eviction: Finished requests drop out immediately at step $t$, instantly freeing physical blocks for waiting requests at step $t+1$.
+\[
+\text{table\_index} = i // \text{block\_size}, \quad
+\text{block\_offset} = i \bmod \text{block\_size}
+\]
 
-Prefill / Decode Separation: Simultaneously manages compute-bound Prefill requests (prompt processing) and memory-bound Decode requests (token generation).
+---
 
-📂 Project Structure
+### 3) Iteration-Level Continuous Batching (`ContinuousScheduler`)
 
+- Token-step scheduling instead of static batch execution
+- Immediate eviction of completed requests
+- Frees blocks instantly for waiting requests on next iteration
+- Handles both:
+  - **Prefill** (prompt processing; compute-heavy)
+  - **Decode** (token generation; memory-heavy)
+
+---
+
+## 📂 Project structure
+
+```text
 .
-├── main.py                     # Benchmark runner and execution simulation
+├── main.py                     # Benchmark runner + execution simulation
 └── vllm_engine/
     ├── __init__.py
-    ├── block_allocator.py      # Physical block allocation & VRAM management
-    ├── paged_kv_cache.py       # Physical 5D VRAM tensor & PagedAttention calculation
-    └── scheduler.py            # Iteration-level continuous batching scheduler
+    ├── block_allocator.py      # Physical block allocation / free list management
+    ├── paged_kv_cache.py       # Paged KV tensor + address translation + attention
+    └── scheduler.py            # Continuous batching scheduler
+```
 
+---
 
-🚀 Quickstart
+## ⚡ Quickstart
 
-Prerequisites
+### Prerequisites
 
-Python 3.8+
+- Python 3.8+
+- PyTorch (`torch`)
 
-torch (PyTorch)
+### Installation
 
-Running the Engine Benchmark
+```bash
+git clone https://github.com/huRashidy/vllm_engine.git
+cd vllm_engine
+```
 
-Clone the repository:
+### Run benchmark simulation
 
-git clone https://github.com/your-username/mini-vllm-engine.git
-cd mini-vllm-engine
-
-
-Run the simulation:
-
+```bash
 python main.py
+```
 
+---
 
-📊 Sample Execution Output
+## 📊 Example output
 
+```text
 =================================================================
 🚀 Initializing Mini-vLLM Engine Benchmark Simulation
 =================================================================
@@ -110,10 +146,25 @@ Initial Free VRAM Blocks: 8 / 8
   Free Memory Blocks Remaining: 5 / 8
 
 ✅ Mini-vLLM Engine Simulation Completed Successfully!
+```
 
+---
 
-📚 References & Further Reading
+## 🎯 Learning goals
 
-vLLM: Efficient Memory Management for Large Language Model Serving with PagedAttention (Kwon et al., 2023)
+This project is useful if you want to understand:
 
-vLLM Official Documentation
+- How PagedAttention removes KV-cache fragmentation
+- How block tables map logical tokens to non-contiguous physical memory
+- How continuous batching improves serving utilization
+- Why prefill/decode phases have different system bottlenecks
+
+---
+
+## 📚 References
+
+- **vLLM Paper (2023):**  
+  *Efficient Memory Management for Large Language Model Serving with PagedAttention*  
+  Kwon et al. (arXiv)
+- **vLLM Project:** https://github.com/vllm-project/vllm
+- **vLLM Documentation:** https://docs.vllm.ai/
