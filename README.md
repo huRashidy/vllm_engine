@@ -48,26 +48,15 @@ Physical VRAM Blocks:
 - Allocates blocks on-demand as decode progresses
 - Avoids large up-front contiguous reservations
 
-\[
-\text{Required Blocks} = \left\lfloor \frac{N + \text{block\_size} - 1}{\text{block\_size}} \right\rfloor
-\]
-
 ---
 
 ### 2) Paged KV Cache (`PagedKVCache`)
 
 - Stores all K/V states in one 5D physical tensor:
 
-\[
-(\text{num\_blocks}, 2, \text{block\_size}, \text{num\_heads}, \text{head\_dim})
-\]
 
 - Resolves logical token index \(i\) → physical block location at runtime:
 
-\[
-\text{table\_index} = i // \text{block\_size}, \quad
-\text{block\_offset} = i \bmod \text{block\_size}
-\]
 
 ---
 
